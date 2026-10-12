@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sudoku Vision Solver</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+
+        .sudoku-grid {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            gap: 1px;
+            background-color: #374151;
+            border: 2px solid #1f2937;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        .sudoku-cell {
+            background-color: white;
+            aspect-ratio: 1;
+            text-align: center;
+            font-size: 1.25rem;
+            font-weight: 600;
+            border: none;
+            outline: none;
+            color: #111827;
+            width: 100%;
+            height: 100%;
+            padding: 0;
+        }
+
+        /* Thicker borders for 3x3 blocks */
+        .sudoku-cell:nth-child(3n) {
+            border-right: 2px solid #1f2937;
+        }
+        .sudoku-cell:nth-child(9n) {
+            border-right: none; /* except the last one in row */
+        }
+        
+        .sudoku-row-3 .sudoku-cell,
+        .sudoku-row-6 .sudoku-cell {
+            border-bottom: 2px solid #1f2937;
+        }
+
+        .sudoku-cell:focus {
+            background-color: #e0e7ff;
+        }
+
+        .sudoku-cell.initial {
+            color: #4f46e5;
+        }
+
+        .sudoku-cell.solved {
+            color: #16a34a;
+        }
+
+        /* Canvas interaction container */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            overflow: hidden;
+            background: #e5e7eb;
+            border-radius: 0.5rem;
+            touch-action: none; /* Prevent scrolling while dragging */
+        }
+
+        #overlay-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(9, 1fr);
+            border: 3px solid #ef4444;
+        }
+
+        .overlay-cell {
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        .overlay-cell:nth-child(3n) { border-right: 2px solid #ef4444; }
+        .overlay-cell:nth-child(9n) { border-right: 1px solid rgba(239, 68, 68, 0.4); }
+        
+        /* Loading Spinner */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 10px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        input[type="range"] {
+            accent-color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
+        <header class="bg-indigo-600 text-white p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="text-center md:text-left">
+                <h1 class="text-3xl font-bold">Sudoku Vision Solver</h1>
+                <p class="mt-2 text-indigo-100">Upload, extract, and solve any Sudoku puzzle instantly.</p>
+            </div>
+            <div id="auth-container" class="flex items-center gap-3">
+                <span id="user-info" class="hidden text-sm font-medium"></span>
+                <button id="login-btn" class="bg-white text-indigo-600 px-4 py-2 rounded-lg font-semibold hover:bg-indigo-50 transition shadow hidden">
+                    Sign in
+                </button>
+                <button id="logout-btn" class="hidden bg-indigo-800 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-900 transition shadow">
+                    Sign out
+                </button>
+            </div>
+        </header>
+
+        <div id="login-prompt-container" class="flex flex-col items-center justify-center p-12 text-center min-h-[400px]">
+            <div class="bg-indigo-50 p-6 rounded-full mb-6 text-indigo-600">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+            </div>
+            <h2 class="text-2xl font-bold text-gray-800 mb-3">Sign in to Continue</h2>
+            <p class="text-gray-600 mb-8 max-w-md">Please sign in with your Google account to access the solver and use Gemini's vision capabilities for accurate digit extraction.</p>
+            <button id="main-login-btn" class="bg-indigo-600 text-white px-8 py-3 rounded-xl font-semibold hover:bg-indigo-700 transition shadow-lg text-lg flex items-center gap-3">
+                <svg class="w-5 h-5 bg-white rounded-full p-0.5 text-indigo-600" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                Sign in with Google
+            </button>
+        </div>
+
+        <div id="main-app-content" class="hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+            
+            <!-- Left Column: Input and Processing -->
+            <div class="space-y-6">
+                
+                <!-- Step 1: Input -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <h2 class="text-xl font-semibold mb-4">1. Capture or Upload</h2>
+                    <div class="flex flex-col gap-3">
+                        <label class="block w-full cursor-pointer bg-white border border-gray-300 text-gray-700 py-3 px-4 rounded-lg text-center hover:bg-gray-50 transition">
+                            <span class="font-medium">Choose Image</span>
+                            <input type="file" id="image-upload" accept="image/*" class="hidden" />
+                        </label>
+                        <button id="start-camera" class="w-full bg-indigo-100 text-indigo-700 font-medium py-3 px-4 rounded-lg hover:bg-indigo-200 transition">
+                            Use Camera
+                        </button>
+                        <div id="camera-container" class="hidden flex-col gap-2 mt-2">
+                            <video id="video" autoplay playsinline class="w-full rounded-lg bg-black"></video>
+                            <button id="capture-btn" class="w-full bg-red-500 text-white font-medium py-2 px-4 rounded-lg hover:bg-red-600 transition">
+                                Capture Photo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Alignment -->
+                <div id="alignment-section" class="bg-gray-50 p-4 rounded-xl border border-gray-200 opacity-50 pointer-events-none transition-opacity">
+                    <h2 class="text-xl font-semibold mb-2">2. Align Grid</h2>
+                    <p class="text-sm text-gray-500 mb-4">Drag and zoom the image to fit the red grid perfectly over the Sudoku puzzle.</p>
+                    
+                    <div class="canvas-container shadow-inner" id="canvas-wrapper">
+                        <canvas id="image-canvas" class="cursor-move"></canvas>
+                        <div id="overlay-grid">
+                            <!-- JS will populate 81 cells here for the grid lines -->
+                        </div>
+                    </div>
+
+                    <div class="mt-4 space-y-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Zoom</label>
+                            <input type="range" id="zoom-slider" min="0.1" max="5" step="0.1" value="1" class="w-full">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">B&W Threshold (helps OCR)</label>
+                            <input type="range" id="threshold-slider" min="0" max="255" step="1" value="128" class="w-full">
+                        </div>
+                        <button id="extract-btn" class="w-full bg-indigo-600 text-white font-medium py-3 px-4 rounded-lg hover:bg-indigo-700 transition shadow-md disabled:bg-gray-400 disabled:cursor-not-allowed">
+                            Extract Digits (Requires Login)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Results & Solving -->
+            <div class="space-y-6">
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 h-full flex flex-col">
+                    <h2 class="text-xl font-semibold mb-2">3. Verify & Solve</h2>
+                    <p class="text-sm text-gray-500 mb-4">Correct any OCR mistakes manually before solving.</p>
+                    
+                    <div id="sudoku-container" class="flex-grow flex items-center justify-center">
+                        <div class="sudoku-grid" id="sudoku-board">
+                            <!-- Input cells generated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex gap-3">
+                        <button id="solve-btn" class="flex-1 bg-green-600 text-white font-medium py-3 px-4 rounded-lg hover:bg-green-700 transition shadow-md">
+                            Solve Puzzle
+                        </button>
+                        <button id="clear-btn" class="flex-1 bg-gray-200 text-gray-700 font-medium py-3 px-4 rounded-lg hover:bg-gray-300 transition">
+                            Clear
+                        </button>
+                    </div>
+                    
+                    <div id="status-message" class="mt-4 text-center font-medium min-h-[24px]"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const uploadInput = document.getElementById('image-upload');
+        const startCameraBtn = document.getElementById('start-camera');
+        const cameraContainer = document.getElementById('camera-container');
+        const video = document.getElementById('video');
+        const captureBtn = document.getElementById('capture-btn');
+        
+        const alignmentSection = document.getElementById('alignment-section');
+        const canvas = document.getElementById('image-canvas');
+        const ctx = canvas.getContext('2d');
+        const canvasWrapper = document.getElementById('canvas-wrapper');
+        const overlayGrid = document.getElementById('overlay-grid');
+        const zoomSlider = document.getElementById('zoom-slider');
+        const thresholdSlider = document.getElementById('threshold-slider');
+        const extractBtn = document.getElementById('extract-btn');
+        
+        const sudokuBoard = document.getElementById('sudoku-board');
+        const solveBtn = document.getElementById('solve-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const statusMessage = document.getElementById('status-message');
+
+        // State variables
+        let rawImage = null;
+        let imgX = 0;
+        let imgY = 0;
+        let imgScale = 1;
+        let baseScale = 1;
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let thresholdValue = 128;
+        
+        window.isUserLoggedIn = false; // Initialize globally
+        
+        function updateExtractButtonState() {
+            if (!rawImage) {
+                extractBtn.disabled = true;
+                return;
+            }
+            if (window.isUserLoggedIn) {
+                extractBtn.disabled = false;
+                extractBtn.textContent = "Extract Digits";
+                setStatus("Image loaded. Align the red grid to the Sudoku border.", "text-blue-600");
+            } else {
+                extractBtn.disabled = true;
+                extractBtn.textContent = "Extract Digits (Requires Login)";
+                setStatus("Image loaded. Please Sign in with Google to extract.", "text-amber-600");
+            }
+        }
+        
+        // Setup Grid UI
+        function initGridUI() {
+            // Overlay grid for alignment
+            for (let i = 0; i < 81; i++) {
+                const div = document.createElement('div');
+                div.className = 'overlay-cell';
+                // Add row classes for bottom borders
+                const row = Math.floor(i / 9);
+                if (row === 2) div.classList.add('overlay-row-3');
+                if (row === 5) div.classList.add('overlay-row-6');
+                overlayGrid.appendChild(div);
+            }
+
+            // Interactive Sudoku Board
+            for (let i = 0; i < 81; i++) {
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.min = '1';
+                input.max = '9';
+                input.className = 'sudoku-cell';
+                input.dataset.index = i;
+                
+                // Row logic for thicker borders
+                const row = Math.floor(i / 9);
+                if (row === 2 || row === 5) {
+                    // Handled in CSS with nth-child but wrapping divs help. We use CSS nth-child/row classes.
+                }
+                if(row >=2 && row < 3) input.parentElement?.classList.add('sudoku-row-3'); // CSS handles this via wrapper logic or pure child logic.
+                
+                // Ensure only 1-9 is entered
+                input.addEventListener('input', (e) => {
+                    if (e.target.value.length > 1) {
+                        e.target.value = e.target.value.slice(-1);
+                    }
+                    if (e.target.value === '0') e.target.value = '';
+                    e.target.classList.add('initial');
+                    e.target.classList.remove('solved');
+                });
+                
+                sudokuBoard.appendChild(input);
+            }
+            // Add row classes for border styling
+            const cells = Array.from(sudokuBoard.children);
+            for(let r=0; r<9; r++){
+                if(r===2) { for(let c=0; c<9; c++) cells[r*9+c].style.borderBottom = "2px solid #1f2937"; }
+                if(r===5) { for(let c=0; c<9; c++) cells[r*9+c].style.borderBottom = "2px solid #1f2937"; }
+            }
+        }
+        initGridUI();
+
+        // Image Upload
+        uploadInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                loadImageToCanvas(event.target.result);
+                stopCamera();
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // Camera Logic
+        let stream = null;
+        startCameraBtn.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                cameraContainer.classList.remove('hidden');
+                startCameraBtn.classList.add('hidden');
+            } catch (err) {
+                alert("Camera access denied or unavailable.");
+            }
+        });
+
+        captureBtn.addEventListener('click', () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(video, 0, 0);
+            loadImageToCanvas(tempCanvas.toDataURL('image/png'));
+            stopCamera();
+        });
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            cameraContainer.classList.add('hidden');
+            startCameraBtn.classList.remove('hidden');
+        }
+
+        function loadImageToCanvas(dataUrl) {
+            const img = new Image();
+            img.onload = () => {
+                rawImage = img;
+                
+                // Initialize canvas dimensions to match container width, maintain square shape
+                const width = canvasWrapper.clientWidth;
+                canvas.width = width;
+                canvas.height = width; // Square for Sudoku
+                
+                // Center and scale image to fit canvas initially
+                baseScale = Math.min(canvas.width / img.width, canvas.height / img.height);
+                imgScale = baseScale; // 1x multiplier from base
+                zoomSlider.value = 1;
+                
+                imgX = (canvas.width - img.width * imgScale) / 2;
+                imgY = (canvas.height - img.height * imgScale) / 2;
+                
+                drawCanvas();
+                alignmentSection.classList.remove('opacity-50', 'pointer-events-none');
+                
+                updateExtractButtonState();
+            };
+            img.src = dataUrl;
+        }
+
+        function drawCanvas() {
+            if (!rawImage) return;
+            
+            // Clear canvas
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw transformed image
+            ctx.save();
+            ctx.translate(imgX, imgY);
+            ctx.scale(imgScale, imgScale);
+            ctx.drawImage(rawImage, 0, 0);
+            ctx.restore();
+
+            // Apply Black and White thresholding
+            applyThreshold();
+        }
+
+        function applyThreshold() {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                // Grayscale
+                const brightness = (data[i] * 0.299) + (data[i + 1] * 0.587) + (data[i + 2] * 0.114);
+                // Threshold
+                const value = brightness >= thresholdValue ? 255 : 0;
+                data[i] = data[i + 1] = data[i + 2] = value;
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        // Canvas Interactions (Drag and Zoom)
+        canvas.addEventListener('mousedown', startDrag);
+        canvas.addEventListener('mousemove', drag);
+        window.addEventListener('mouseup', endDrag);
+        
+        canvas.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            startDrag({ clientX: touch.clientX, clientY: touch.clientY });
+        }, {passive: false});
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // Prevent scrolling
+            const touch = e.touches[0];
+            drag({ clientX: touch.clientX, clientY: touch.clientY });
+        }, {passive: false});
+        window.addEventListener('touchend', endDrag);
+
+        function startDrag(e) {
+            if (!rawImage) return;
+            isDragging = true;
+            dragStartX = e.clientX - imgX;
+            dragStartY = e.clientY - imgY;
+        }
+
+        function drag(e) {
+            if (!isDragging || !rawImage) return;
+            imgX = e.clientX - dragStartX;
+            imgY = e.clientY - dragStartY;
+            drawCanvas();
+        }
+
+        function endDrag() {
+            isDragging = false;
+        }
+
+        zoomSlider.addEventListener('input', (e) => {
+            if (!rawImage) return;
+            // Zoom towards center
+            const zoomMultiplier = parseFloat(e.target.value);
+            const newScale = baseScale * zoomMultiplier;
+            const scaleRatio = newScale / imgScale;
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            imgX = centerX - (centerX - imgX) * scaleRatio;
+            imgY = centerY - (centerY - imgY) * scaleRatio;
+            
+            imgScale = newScale;
+            drawCanvas();
+        });
+
+        thresholdSlider.addEventListener('input', (e) => {
+            thresholdValue = parseInt(e.target.value);
+            drawCanvas();
+        });
+
+        function setStatus(text, colorClass = "text-gray-700", isLoading = false) {
+            statusMessage.className = `mt-4 text-center font-medium min-h-[24px] ${colorClass}`;
+            if (isLoading) {
+                statusMessage.innerHTML = `<span class="loader"></span> ${text}`;
+            } else {
+                statusMessage.textContent = text;
+            }
+        }
+
+        extractBtn.addEventListener('click', async () => {
+            if (!rawImage) return;
+            if (!window.isUserLoggedIn) {
+                setStatus("Please sign in with Google first.", "text-red-600");
+                return;
+            }
+            
+            setStatus("Analyzing image with Gemini...", "text-indigo-600", true);
+            extractBtn.disabled = true;
+            solveBtn.disabled = true;
+
+            try {
+                // Get the current visible canvas as base64 (already aligned and thresholded)
+                const base64ImageData = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+                
+                const payload = {
+                    contents: [{
+                        role: "user",
+                        parts: [
+                            { text: "You are an expert OCR system. Extract the Sudoku grid from this image. Respond with a JSON object containing a 'grid' property, which is a 2D array (9 rows, 9 columns) of integers. Use 0 for empty or blank cells. Only output numbers that are clearly visible." },
+                            {
+                                inlineData: {
+                                    mimeType: "image/jpeg",
+                                    data: base64ImageData
+                                }
+                            }
+                        ]
+                    }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                "grid": {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "ARRAY",
+                                        items: { type: "INTEGER" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const apiKey = ""; // Immersive environment handles the key
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates.length > 0) {
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const parsedJson = JSON.parse(jsonText);
+                    const extractedGrid = parsedJson.grid;
+                    
+                    if (extractedGrid && extractedGrid.length === 9) {
+                        const cells = Array.from(sudokuBoard.children);
+                        // Clear current board
+                        cells.forEach(cell => {
+                            cell.value = '';
+                            cell.classList.remove('initial', 'solved');
+                        });
+                        
+                        for (let row = 0; row < 9; row++) {
+                            for (let col = 0; col < 9; col++) {
+                                const val = extractedGrid[row][col];
+                                if (val > 0 && val <= 9) {
+                                    const index = row * 9 + col;
+                                    cells[index].value = val;
+                                    cells[index].classList.add('initial');
+                                }
+                            }
+                        }
+                        setStatus("Extraction complete! Please correct any errors before solving.", "text-green-600");
+                    } else {
+                        throw new Error("Invalid grid format returned by Gemini.");
+                    }
+                } else {
+                    throw new Error("Failed to extract data from Gemini response.");
+                }
+                
+            } catch (error) {
+                console.error(error);
+                setStatus("Error during extraction. Please ensure the grid is aligned properly.", "text-red-600");
+            } finally {
+                extractBtn.disabled = false;
+                solveBtn.disabled = false;
+            }
+        });
+
+        function getBoard() {
+            const board = [];
+            const cells = Array.from(sudokuBoard.children);
+            for (let r = 0; r < 9; r++) {
+                const row = [];
+                for (let c = 0; c < 9; c++) {
+                    const val = cells[r * 9 + c].value;
+                    row.push(val === '' ? 0 : parseInt(val));
+                }
+                board.push(row);
+            }
+            return board;
+        }
+
+        function setBoard(board, originalBoard) {
+            const cells = Array.from(sudokuBoard.children);
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    const index = r * 9 + c;
+                    const cell = cells[index];
+                    if (originalBoard[r][c] === 0 && board[r][c] !== 0) {
+                        cell.value = board[r][c];
+                        cell.classList.add('solved');
+                        cell.classList.remove('initial');
+                    }
+                }
+            }
+        }
+
+        function isValid(board, row, col, num) {
+            // Check row
+            for (let x = 0; x <= 8; x++)
+                if (board[row][x] === num) return false;
+
+            // Check column
+            for (let x = 0; x <= 8; x++)
+                if (board[x][col] === num) return false;
+
+            // Check 3x3 box
+            let startRow = row - row % 3, startCol = col - col % 3;
+            for (let i = 0; i < 3; i++)
+                for (let j = 0; j < 3; j++)
+                    if (board[i + startRow][j + startCol] === num) return false;
+
+            return true;
+        }
+
+        function solveSudokuLogic(board) {
+            let row = -1;
+            let col = -1;
+            let isEmpty = true;
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    if (board[i][j] === 0) {
+                        row = i;
+                        col = j;
+                        isEmpty = false;
+                        break;
+                    }
+                }
+                if (!isEmpty) break;
+            }
+
+            // No empty space left
+            if (isEmpty) return true;
+
+            for (let num = 1; num <= 9; num++) {
+                if (isValid(board, row, col, num)) {
+                    board[row][col] = num;
+                    if (solveSudokuLogic(board)) return true;
+                    board[row][col] = 0; // backtrack
+                }
+            }
+            return false;
+        }
+
+        solveBtn.addEventListener('click', () => {
+            const board = getBoard();
+            const originalBoard = JSON.parse(JSON.stringify(board)); // Deep copy
+            
+            // Basic validation check before solving
+            let validInitial = true;
+            for(let r=0; r<9; r++){
+                for(let c=0; c<9; c++){
+                    const val = board[r][c];
+                    if(val !== 0){
+                        board[r][c] = 0; // Temp clear to check validity
+                        if(!isValid(board, r, c, val)) validInitial = false;
+                        board[r][c] = val; // Restore
+                    }
+                }
+            }
+
+            if(!validInitial) {
+                setStatus("The current puzzle state is invalid. Check for duplicate numbers in rows, columns, or 3x3 grids.", "text-red-600");
+                return;
+            }
+
+            setStatus("Solving...", "text-indigo-600", true);
+            
+            // Use setTimeout to allow UI to update to "Solving..." before heavy calculation
+            setTimeout(() => {
+                const startTime = performance.now();
+                if (solveSudokuLogic(board)) {
+                    setBoard(board, originalBoard);
+                    const endTime = performance.now();
+                    const timeTaken = ((endTime - startTime) / 1000).toFixed(3);
+                    setStatus(`Puzzle solved successfully in ${timeTaken} seconds!`, "text-green-600");
+                } else {
+                    setStatus("This puzzle cannot be solved. Please check the entered digits.", "text-red-600");
+                }
+            }, 50);
+        });
+
+        clearBtn.addEventListener('click', () => {
+            const cells = Array.from(sudokuBoard.children);
+            cells.forEach(cell => {
+                cell.value = '';
+                cell.classList.remove('initial', 'solved');
+            });
+            setStatus("Board cleared.", "text-gray-600");
+        });
+
+        // Initialize empty status
+        setStatus("Ready.", "text-gray-500");
+
+    </script>
+
+    <!-- Firebase Auth Module -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        const loginBtn = document.getElementById('login-btn');
+        const mainLoginBtn = document.getElementById('main-login-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const userInfo = document.getElementById('user-info');
+        const statusMessage = document.getElementById('status-message');
+        const mainAppContent = document.getElementById('main-app-content');
+        const loginPromptContainer = document.getElementById('login-prompt-container');
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        
+        if (Object.keys(firebaseConfig).length > 0) {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const provider = new GoogleAuthProvider();
+
+            const handleLogin = async () => {
+                try {
+                    await signInWithPopup(auth, provider);
+                } catch (error) {
+                    console.error("Login failed:", error);
+                    alert("Login failed: " + error.message);
+                }
+            };
+
+            loginBtn.addEventListener('click', handleLogin);
+            mainLoginBtn.addEventListener('click', handleLogin);
+
+            logoutBtn.addEventListener('click', () => {
+                signOut(auth);
+            });
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    window.isUserLoggedIn = true;
+                    loginBtn.classList.add('hidden');
+                    logoutBtn.classList.remove('hidden');
+                    userInfo.classList.remove('hidden');
+                    userInfo.textContent = `Hi, ${user.displayName || 'User'}`;
+                    
+                    loginPromptContainer.classList.add('hidden');
+                    mainAppContent.classList.remove('hidden');
+                } else {
+                    window.isUserLoggedIn = false;
+                    loginBtn.classList.remove('hidden');
+                    logoutBtn.classList.add('hidden');
+                    userInfo.classList.add('hidden');
+                    
+                    loginPromptContainer.classList.remove('hidden');
+                    mainAppContent.classList.add('hidden');
+                }
+                
+                // Update UI state for the extract button
+                if (typeof window.updateExtractButtonState === 'function') {
+                    window.updateExtractButtonState();
+                }
+            });
+        } else {
+            console.warn("Firebase configuration not found. Authentication unavailable.");
+        }
+    </script>
+</body>
+</html>
